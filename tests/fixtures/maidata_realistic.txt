@@ -1,0 +1,19 @@
+&title=Future Rhythm
+&artist=Unit Test Band
+&wholebpm=174
+&first=0.000
+&lv_1=4
+&lv_2=7+
+&lv_3=10
+&lv_4=13
+&lv_5=14+
+&des_4=Realistic Designer
+&des_5=Another Designer
+&inote_4=
+{4}
+(174)
+1,2,3,4,
+5h[2:1],6-2[4:1],
+&inote_5=
+{8}
+1,8,1,8,

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "maimai-ai-chart"
+version = "0.1.0"
+description = "V1 foundation for Maidata/Simai-like maimai fan chart parsing and raw-preserving export."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "maimai-ai-chart contributors" }
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8"
+]
+audio = [
+  "librosa>=0.10",
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "soundfile>=0.12"
+]
+training = [
+  "torch>=2.0"
+]
+
+[project.scripts]
+maichart = "maichart.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
