@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 FIELD_RE = re.compile(r"^&(?P<key>[A-Za-z][A-Za-z0-9_]*)=")
-DIFFICULTY_RANGE = range(1, 6)
+DIFFICULTY_RANGE = range(1, 7)
 DEFAULT_ENCODING_CANDIDATES = ("utf-8-sig", "utf-8", "shift_jis", "cp932", "gbk")
 
 
@@ -165,7 +165,8 @@ def parse_maidata_file(
 
 
 def _is_inote_key(key: str) -> bool:
-    return re.fullmatch(r"inote_[1-5]", key) is not None
+    match = re.fullmatch(r"inote_(\d+)", key)
+    return match is not None and int(match.group(1)) in DIFFICULTY_RANGE
 
 
 def _indexed_fields(fields: dict[str, str], prefix: str) -> dict[int, str]:

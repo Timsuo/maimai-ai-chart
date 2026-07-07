@@ -8,6 +8,7 @@ import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from maichart.alignment import (
@@ -47,6 +48,7 @@ DIFFICULTY_NAMES = {
     3: "advanced",
     4: "expert",
     5: "master",
+    6: "remaster",
 }
 DIFFICULTY_WEIGHTS = {
     "easy": 0.25,
@@ -54,7 +56,7 @@ DIFFICULTY_WEIGHTS = {
     "advanced": 0.6,
     "expert": 1.0,
     "master": 1.1,
-    "remaster": 1.1,
+    "remaster": 1.2,
 }
 MIN_TRAINING_NOTES = 20
 
@@ -462,6 +464,8 @@ def _process_difficulty(
     warning_codes = [issue.code for issue in report.issues if issue.severity == "warning"]
     difficulty_name = DIFFICULTY_NAMES.get(difficulty_index, f"difficulty_{difficulty_index}")
     level, level_is_numeric = _parse_level(stats.level)
+    qc_tags = _qc_tags(level_is_numeric=level_is_numeric)
+    qc_warnings = _qc_warnings(level_is_numeric=level_is_numeric)
     chart_ir_path = cache_root / "chart_ir" / sample.song_id / f"difficulty_{difficulty_index}.chart_ir.json"
     labels_path = cache_root / "frame_labels" / sample.song_id / f"difficulty_{difficulty_index}.frame_labels.json"
     alignment_path = cache_root / "alignment_reports" / sample.song_id / f"difficulty_{difficulty_index}.alignment_report.json"
@@ -475,22 +479,40 @@ def _process_difficulty(
         "nearest_onset_mean_delta_ms": None,
     }
     alignment_status = "skipped" if skip_alignment else "pending"
+    has_existing_chart_ir = chart_ir_path.exists() and not force
+    has_existing_frame_labels = labels_path.exists() and not force
+    has_existing_alignment = alignment_path.exists() and not force
 
-    try:
-        chart_ir = _load_or_build_chart_ir(
-            chart,
-            difficulty_index=difficulty_index,
-            path=chart_ir_path,
-            force=force,
-        )
-        chart_ir_ok = True
-    except Exception as exc:  # noqa: BLE001
-        errors.append(_error_dict("chart_ir", exc, song_id=sample.song_id, difficulty_index=difficulty_index))
+    chart_ir_ok = has_existing_chart_ir
+    frame_labels_ok = has_existing_frame_labels
 
-    if chart_ir is not None:
+    def ensure_chart_ir():
+        nonlocal chart_ir, chart_ir_ok
+        if chart_ir is not None:
+            return chart_ir
+        try:
+            chart_ir = _load_or_build_chart_ir(
+                chart,
+                difficulty_index=difficulty_index,
+                path=chart_ir_path,
+                force=force,
+            )
+            chart_ir_ok = True
+        except Exception as exc:  # noqa: BLE001
+            chart_ir_ok = False
+            errors.append(_error_dict("chart_ir", exc, song_id=sample.song_id, difficulty_index=difficulty_index))
+        return chart_ir
+
+    def ensure_frame_labels():
+        nonlocal frame_labels, frame_labels_ok
+        if frame_labels is not None:
+            return frame_labels
+        current_chart_ir = ensure_chart_ir()
+        if current_chart_ir is None:
+            return None
         try:
             frame_labels = _load_or_build_frame_labels(
-                chart_ir,
+                current_chart_ir,
                 song_id=sample.song_id,
                 path=labels_path,
                 division=division,
@@ -498,17 +520,18 @@ def _process_difficulty(
             )
             frame_labels_ok = True
         except Exception as exc:  # noqa: BLE001
+            frame_labels_ok = False
             errors.append(_error_dict("frame_labels", exc, song_id=sample.song_id, difficulty_index=difficulty_index))
+        return frame_labels
 
-    if not skip_alignment and chart_ir is not None and frame_labels is not None and audio_features is not None:
+    if not chart_ir_ok:
+        ensure_chart_ir()
+    if chart_ir_ok and not frame_labels_ok:
+        ensure_frame_labels()
+
+    if not skip_alignment and has_existing_alignment:
         try:
-            alignment_report = _load_or_build_alignment_report(
-                chart_ir,
-                frame_labels,
-                audio_features,
-                path=alignment_path,
-                force=force,
-            )
+            alignment_report = _load_alignment_report_summary(alignment_path)
             alignment_status = "processed"
             alignment_summary = {
                 "onset_hit_rate_50ms": alignment_report.summary.onset_hit_rate_50ms,
@@ -518,11 +541,30 @@ def _process_difficulty(
             alignment_status = "failed"
             errors.append(_error_dict("alignment", exc, song_id=sample.song_id, difficulty_index=difficulty_index))
     elif not skip_alignment:
-        alignment_status = "skipped"
+        current_chart_ir = ensure_chart_ir()
+        current_frame_labels = ensure_frame_labels()
+        if current_chart_ir is not None and current_frame_labels is not None and audio_features is not None:
+            try:
+                alignment_report = _load_or_build_alignment_report(
+                    current_chart_ir,
+                    current_frame_labels,
+                    audio_features,
+                    path=alignment_path,
+                    force=force,
+                )
+                alignment_status = "processed"
+                alignment_summary = {
+                    "onset_hit_rate_50ms": alignment_report.summary.onset_hit_rate_50ms,
+                    "nearest_onset_mean_delta_ms": alignment_report.summary.nearest_onset_mean_delta_ms,
+                }
+            except Exception as exc:  # noqa: BLE001
+                alignment_status = "failed"
+                errors.append(_error_dict("alignment", exc, song_id=sample.song_id, difficulty_index=difficulty_index))
+        else:
+            alignment_status = "skipped"
 
     filter_reasons = _filter_reasons(
         has_chart=bool((raw_difficulty.inote or "").strip()),
-        level_is_numeric=level_is_numeric,
         note_count=stats.note_count,
         validate_errors=report.errors,
         parse_coverage=stats.parse_coverage,
@@ -539,6 +581,7 @@ def _process_difficulty(
     warning_codes.extend(
         _qc_warning_codes(
             difficulty_name=difficulty_name,
+            level_is_numeric=level_is_numeric,
             validate_warnings=report.warnings,
             alignment=alignment_summary,
             alignment_status=alignment_status,
@@ -561,6 +604,8 @@ def _process_difficulty(
         "unknown_token_count": stats.unknown_token_count,
         "validate_errors": report.errors,
         "validate_warnings": report.warnings,
+        "qc_tags": qc_tags,
+        "warnings": qc_warnings,
         "duration_kind_counts": stats.duration_kind_counts,
         "slide_pattern_counts": stats.slide_pattern_counts,
         "alignment": alignment_summary,
@@ -670,12 +715,38 @@ def _load_or_build_audio_features(source: Path, *, path: Path, division: int, sa
 def _load_or_build_alignment_report(chart_ir, labels, audio_features, *, path: Path, force: bool):
     if path.exists() and not force:
         try:
-            return load_alignment_report_json(path)
+            return _load_alignment_report_summary(path)
         except Exception:
             pass
     report = build_alignment_report(chart_ir, labels, audio_features)
     save_alignment_report_json(report, path)
     return report
+
+
+def _load_alignment_report_summary(path: Path):
+    data = _load_alignment_report_header(path)
+    summary = data.get("summary")
+    if not isinstance(summary, dict):
+        return load_alignment_report_json(path)
+    return SimpleNamespace(
+        summary=SimpleNamespace(
+            onset_hit_rate_50ms=summary.get("onset_hit_rate_50ms"),
+            nearest_onset_mean_delta_ms=summary.get("nearest_onset_mean_delta_ms"),
+        )
+    )
+
+
+def _load_alignment_report_header(path: Path) -> dict[str, Any]:
+    prefix_lines: list[str] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if any(marker in line for marker in ('"by_note_type"', '"density"', '"frames"')):
+                break
+            prefix_lines.append(line)
+    prefix = "".join(prefix_lines).rstrip()
+    if prefix.endswith(","):
+        prefix = prefix[:-1]
+    return json.loads(prefix + "\n}")
 
 
 def _stats_for_difficulty(chart: RawMaidataChart, difficulty_index: int) -> DifficultyStats:
@@ -688,7 +759,6 @@ def _stats_for_difficulty(chart: RawMaidataChart, difficulty_index: int) -> Diff
 def _filter_reasons(
     *,
     has_chart: bool,
-    level_is_numeric: bool,
     note_count: int,
     validate_errors: int,
     parse_coverage: float,
@@ -700,8 +770,6 @@ def _filter_reasons(
     reasons: list[str] = []
     if not has_chart:
         reasons.append("missing_chart")
-    if not level_is_numeric:
-        reasons.append("non_numeric_level")
     if note_count < MIN_TRAINING_NOTES:
         reasons.append("note_count_too_low")
     if validate_errors > 0:
@@ -722,11 +790,14 @@ def _filter_reasons(
 def _qc_warning_codes(
     *,
     difficulty_name: str,
+    level_is_numeric: bool,
     validate_warnings: int,
     alignment: dict[str, Any],
     alignment_status: str,
 ) -> list[str]:
     codes: list[str] = []
+    if not level_is_numeric:
+        codes.append("non_numeric_level")
     if difficulty_name in {"easy", "basic"}:
         codes.append("low_reference_difficulty")
     elif difficulty_name == "advanced":
@@ -737,6 +808,20 @@ def _qc_warning_codes(
     if alignment_status == "processed" and hit_rate is not None and hit_rate < 0.1:
         codes.append("low_onset_hit_rate")
     return codes
+
+
+def _qc_tags(*, level_is_numeric: bool) -> list[str]:
+    tags: list[str] = []
+    if not level_is_numeric:
+        tags.append("level_unknown")
+    return tags
+
+
+def _qc_warnings(*, level_is_numeric: bool) -> list[str]:
+    warnings: list[str] = []
+    if not level_is_numeric:
+        warnings.append("non_numeric_level")
+    return warnings
 
 
 def _training_weight(difficulty_name: str, validate_warnings: int, warning_codes: list[str]) -> float:

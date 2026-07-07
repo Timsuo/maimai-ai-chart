@@ -166,10 +166,73 @@ def test_training_filters_empty_inote_unknown_level_low_notes_and_validation_err
     }
 
     assert by_index[1]["usable_for_training"] is False
-    assert {"missing_chart", "non_numeric_level", "note_count_too_low"} <= set(by_index[1]["filter_reasons"])
+    assert {"missing_chart", "note_count_too_low"} <= set(by_index[1]["filter_reasons"])
+    assert "non_numeric_level" not in by_index[1]["filter_reasons"]
+    assert by_index[1]["qc_tags"] == ["level_unknown"]
+    assert by_index[1]["warnings"] == ["non_numeric_level"]
+    assert "non_numeric_level" in by_index[1]["warning_codes"]
     assert by_index[4]["usable_for_training"] is False
     assert {"note_count_too_low", "validate_errors"} <= set(by_index[4]["filter_reasons"])
     assert data["summary"]["filter_reason_counts"]["note_count_too_low"] == 2
+    assert "non_numeric_level" not in data["summary"]["filter_reason_counts"]
+    assert data["summary"]["warning_code_counts"]["non_numeric_level"] == 1
+
+
+def test_training_unknown_level_is_usable_when_other_qc_passes(tmp_path, monkeypatch) -> None:
+    _patch_audio(monkeypatch)
+    _write_sample(
+        tmp_path / "unknown_level",
+        level_1="?",
+        inote_1="{4}" + ",".join(["1"] * 25),
+        level_4="12",
+    )
+
+    manifest = build_training_manifest(
+        tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_path=tmp_path / "training.json",
+        force=True,
+    )
+    data = training_manifest_to_dict(manifest)
+    by_index = {
+        difficulty["difficulty_index"]: difficulty
+        for difficulty in data["songs"][0]["difficulties"]
+    }
+
+    assert by_index[1]["level_raw"] == "?"
+    assert by_index[1]["level"] is None
+    assert by_index[1]["usable_for_training"] is True
+    assert by_index[1]["filter_reasons"] == []
+    assert by_index[1]["qc_tags"] == ["level_unknown"]
+    assert by_index[1]["warnings"] == ["non_numeric_level"]
+    assert "non_numeric_level" in by_index[1]["warning_codes"]
+
+
+def test_training_manifest_includes_remaster_difficulty_six(tmp_path, monkeypatch) -> None:
+    _patch_audio(monkeypatch)
+    sample_dir = tmp_path / "remaster"
+    _write_sample(sample_dir)
+    maidata = (sample_dir / "maidata.txt").read_text(encoding="utf-8")
+    maidata += "\n&lv_6=?\n&des_6=Remaster Designer\n&inote_6={4}" + ",".join(["1"] * 25) + "\n"
+    (sample_dir / "maidata.txt").write_text(maidata, encoding="utf-8")
+
+    manifest = build_training_manifest(
+        tmp_path,
+        cache_dir=tmp_path / "cache",
+        output_path=tmp_path / "training.json",
+        force=True,
+    )
+    data = training_manifest_to_dict(manifest)
+    by_index = {
+        difficulty["difficulty_index"]: difficulty
+        for difficulty in data["songs"][0]["difficulties"]
+    }
+
+    assert by_index[6]["difficulty_name"] == "remaster"
+    assert by_index[6]["level_raw"] == "?"
+    assert by_index[6]["level"] is None
+    assert by_index[6]["usable_for_training"] is True
+    assert by_index[6]["qc_tags"] == ["level_unknown"]
 
 
 def test_training_single_parse_failure_does_not_stop_other_samples(tmp_path, monkeypatch) -> None:

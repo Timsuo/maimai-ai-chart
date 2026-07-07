@@ -61,6 +61,25 @@ def test_collects_raw_difficulty_blocks_without_parsing_notes() -> None:
     assert "1h[2:1],3-7[4:1]," in (difficulty.inote or "")
 
 
+def test_collects_remaster_difficulty_six() -> None:
+    text = (
+        "&lv_6=?\n"
+        "&des_6=Remaster Designer\n"
+        "&inote_6=\n"
+        "{8}\n"
+        "1,2,3,4,\n"
+    )
+
+    chart = parse_maidata_metadata(text)
+
+    assert len(chart.difficulties) == 1
+    difficulty = chart.difficulties[0]
+    assert difficulty.index == 6
+    assert difficulty.level == "?"
+    assert difficulty.designer == "Remaster Designer"
+    assert difficulty.inote == "\n{8}\n1,2,3,4,\n"
+
+
 def test_raw_maidata_json_output() -> None:
     chart = parse_maidata_metadata("&title=JSON Song\n&inote_1=1,\n")
 
