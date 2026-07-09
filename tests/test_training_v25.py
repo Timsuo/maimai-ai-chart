@@ -10,7 +10,8 @@ torch = pytest.importorskip("torch")
 from maichart.models.transformer_v25 import MaichartTransformerV25
 from maichart.training.collate import collate_v25
 from maichart.training.dataset_v25 import MaichartV25Dataset
-from maichart.training.evaluate_v25 import compute_v25_metrics
+from maichart.training.evaluate_v25 import compute_v25_metrics, compute_v25_pattern_details
+from maichart.training.frame_label_codec import START_PATTERN_IGNORE_INDEX, START_PATTERN_TO_ID
 from maichart.training.losses_v25 import compute_v25_losses
 
 
@@ -24,15 +25,30 @@ def test_v25_minimal_dataset_collate_forward_loss_and_metrics(tmp_path) -> None:
     assert sample["x"].shape == (4, dataset.input_dim)
     assert sample["y"]["note_presence"].shape == (4, 1)
     assert sample["y"]["buttons"].shape == (4, 8)
+    assert sample["y"]["note_start"].shape == (4, 1)
+    assert sample["y"]["pattern_start"].shape == (4,)
+    assert sample["y"]["chord_size_start"].shape == (4,)
+    assert sample["y"]["pattern_start"].tolist() == [
+        START_PATTERN_IGNORE_INDEX,
+        START_PATTERN_TO_ID["single_tap"],
+        START_PATTERN_TO_ID["single_hold"],
+        START_PATTERN_IGNORE_INDEX,
+    ]
+    assert sample["y"]["chord_size_start"].tolist() == [START_PATTERN_IGNORE_INDEX, 0, 0, START_PATTERN_IGNORE_INDEX]
 
     batch = collate_v25([sample])
     assert batch["x"].shape == (1, 4, dataset.input_dim)
     assert batch["padding_mask"].shape == (1, 4)
     assert batch["loss_mask"].all()
+    assert batch["y"]["note_start"].shape == (1, 4, 1)
+    assert batch["y"]["pattern_start"].shape == (1, 4)
+    assert batch["y"]["chord_size_start"].shape == (1, 4)
 
     model = MaichartTransformerV25(
         input_dim=dataset.input_dim,
         num_note_types=dataset.num_note_types,
+        num_start_pattern_types=dataset.num_start_pattern_types,
+        num_chord_size_classes=dataset.num_chord_size_start_classes,
         d_model=32,
         nhead=4,
         num_layers=1,
@@ -42,6 +58,9 @@ def test_v25_minimal_dataset_collate_forward_loss_and_metrics(tmp_path) -> None:
     outputs = model(batch["x"], padding_mask=batch["padding_mask"])
     assert outputs["note_presence_logits"].shape == (1, 4, 1)
     assert outputs["button_logits"].shape == (1, 4, 8)
+    assert outputs["note_start_logits"].shape == (1, 4, 1)
+    assert outputs["pattern_start_logits"].shape == (1, 4, dataset.num_start_pattern_types)
+    assert outputs["chord_size_logits"].shape == (1, 4, dataset.num_chord_size_start_classes)
 
     losses = compute_v25_losses(
         outputs,
@@ -72,8 +91,59 @@ def test_v25_minimal_dataset_collate_forward_loss_and_metrics(tmp_path) -> None:
         "note_best_f1",
         "note_best_threshold",
         "density_mae",
+        "note_start_precision",
+        "note_start_recall",
+        "note_start_f1",
+        "note_start_precision@0.5",
+        "note_start_recall@0.5",
+        "note_start_f1@0.5",
+        "note_start_best_f1",
+        "note_start_best_threshold",
+        "note_start_pred_positive_rate@0.5",
+        "note_start_target_positive_rate",
+        "pattern_start_accuracy",
+        "pattern_start_macro_f1",
+        "chord_size_accuracy",
+        "chord_size_macro_f1",
     }
     assert all(isinstance(value, float) for value in metrics.values())
+
+    details = compute_v25_pattern_details(outputs, batch["y"], batch["loss_mask"])
+    assert details["pattern_start"]["total_count"] == 2
+    assert len(details["pattern_start"]["per_class"]) == dataset.num_start_pattern_types
+    assert len(details["pattern_start"]["confusion_matrix"]) == dataset.num_start_pattern_types
+    assert details["chord_size"]["total_count"] == 2
+    assert len(details["chord_size"]["per_class"]) == dataset.num_chord_size_start_classes
+
+
+def test_v25_losses_handle_batch_without_note_starts() -> None:
+    batch_size = 1
+    frames = 3
+    num_note_types = 7
+    outputs = {
+        "note_presence_logits": torch.zeros((batch_size, frames, 1), requires_grad=True),
+        "button_logits": torch.zeros((batch_size, frames, 8), requires_grad=True),
+        "type_logits": torch.zeros((batch_size, frames, num_note_types), requires_grad=True),
+        "density_pred": torch.zeros((batch_size, frames, 1), requires_grad=True),
+        "note_start_logits": torch.zeros((batch_size, frames, 1), requires_grad=True),
+        "pattern_start_logits": torch.zeros((batch_size, frames, 11), requires_grad=True),
+        "chord_size_logits": torch.zeros((batch_size, frames, 3), requires_grad=True),
+    }
+    targets = {
+        "note_presence": torch.zeros((batch_size, frames, 1)),
+        "buttons": torch.zeros((batch_size, frames, 8)),
+        "note_type": torch.zeros((batch_size, frames), dtype=torch.long),
+        "density": torch.zeros((batch_size, frames, 1)),
+        "note_start": torch.zeros((batch_size, frames, 1)),
+        "pattern_start": torch.full((batch_size, frames), START_PATTERN_IGNORE_INDEX, dtype=torch.long),
+        "chord_size_start": torch.full((batch_size, frames), START_PATTERN_IGNORE_INDEX, dtype=torch.long),
+    }
+    losses = compute_v25_losses(outputs, targets, torch.ones((batch_size, frames), dtype=torch.bool))
+
+    assert torch.isfinite(losses["loss"])
+    assert losses["loss_pattern_start"].item() == 0.0
+    assert losses["loss_chord_size"].item() == 0.0
+    losses["loss"].backward()
 
 
 def _write_minimal_v25_cache(root: Path) -> Path:

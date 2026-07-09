@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,9 @@ def test_v25_dataset_collate_forward_loss_backward_smoke(tmp_path) -> None:
     assert sample["y"]["buttons"].shape == (sample["x"].shape[0], 8)
     assert sample["y"]["note_type"].shape == (sample["x"].shape[0],)
     assert sample["y"]["density"].shape == (sample["x"].shape[0], 1)
+    assert sample["y"]["note_start"].shape == (sample["x"].shape[0], 1)
+    assert sample["y"]["pattern_start"].shape == (sample["x"].shape[0],)
+    assert sample["y"]["chord_size_start"].shape == (sample["x"].shape[0],)
 
     batch = collate_v25([sample, dataset[1]])
     assert batch["x"].ndim == 3
@@ -34,6 +38,9 @@ def test_v25_dataset_collate_forward_loss_backward_smoke(tmp_path) -> None:
     assert batch["padding_mask"].shape == batch["x"].shape[:2]
     assert batch["loss_mask"].shape == batch["x"].shape[:2]
     assert batch["y"]["buttons"].shape[:2] == batch["x"].shape[:2]
+    assert batch["y"]["note_start"].shape == (*batch["x"].shape[:2], 1)
+    assert batch["y"]["pattern_start"].shape == batch["x"].shape[:2]
+    assert batch["y"]["chord_size_start"].shape == batch["x"].shape[:2]
 
     model = MaichartTransformerV25(
         input_dim=dataset.input_dim,
@@ -49,6 +56,9 @@ def test_v25_dataset_collate_forward_loss_backward_smoke(tmp_path) -> None:
     assert outputs["button_logits"].shape == (*batch["x"].shape[:2], 8)
     assert outputs["type_logits"].shape == (*batch["x"].shape[:2], dataset.num_note_types)
     assert outputs["density_pred"].shape == (*batch["x"].shape[:2], 1)
+    assert outputs["note_start_logits"].shape == (*batch["x"].shape[:2], 1)
+    assert outputs["pattern_start_logits"].shape == (*batch["x"].shape[:2], dataset.num_start_pattern_types)
+    assert outputs["chord_size_logits"].shape == (*batch["x"].shape[:2], dataset.num_chord_size_start_classes)
 
     losses = compute_v25_losses(outputs, batch["y"], batch["loss_mask"])
     losses["loss"].backward()
@@ -91,3 +101,70 @@ def test_v25_overfit_one_sample_train_entrypoint_starts(tmp_path) -> None:
         ]
     ) == 0
     assert (checkpoint_dir / "v25_last.pt").is_file()
+
+
+def test_v25_train_entrypoint_logs_validation_and_early_stops(tmp_path) -> None:
+    checkpoint_dir = tmp_path / "checkpoints"
+    log_csv = tmp_path / "train_log.csv"
+
+    assert train_main(
+        [
+            "--manifest",
+            str(Path("manifests") / "training_manifest_limit2.json"),
+            "--val-manifest",
+            str(Path("manifests") / "training_manifest_limit2.json"),
+            "--cache-dir",
+            "cache",
+            "--epochs",
+            "3",
+            "--batch-size",
+            "1",
+            "--lr",
+            "1e-4",
+            "--overfit-one-sample",
+            "--checkpoint-dir",
+            str(checkpoint_dir),
+            "--log-csv",
+            str(log_csv),
+            "--save-every",
+            "0",
+            "--val-every",
+            "1",
+            "--early-stopping-patience",
+            "1",
+            "--early-stopping-min-delta",
+            "999",
+            "--d-model",
+            "32",
+            "--nhead",
+            "4",
+            "--num-layers",
+            "1",
+            "--dim-feedforward",
+            "64",
+            "--dropout",
+            "0.0",
+        ]
+    ) == 0
+
+    rows = list(csv.DictReader(log_csv.open(encoding="utf-8")))
+    assert len(rows) == 2
+    assert rows[0]["train_loss"]
+    assert rows[0]["val_loss"]
+    assert rows[0]["val_note_presence_f1"]
+    assert rows[0]["val_button_best_f1"]
+    assert rows[0]["val_note_type_accuracy"]
+    assert rows[0]["val_density_mae"]
+    assert rows[0]["loss_note_start"]
+    assert rows[0]["loss_pattern_start"]
+    assert rows[0]["loss_chord_size"]
+    assert rows[0]["val_loss_note_start"]
+    assert rows[0]["val_loss_pattern_start"]
+    assert rows[0]["val_loss_chord_size"]
+    assert rows[0]["val_note_start_f1"]
+    assert rows[0]["val_pattern_start_accuracy"]
+    assert rows[0]["val_chord_size_accuracy"]
+    assert (checkpoint_dir / "v25_best_val.pt").is_file()
+
+    checkpoint = torch.load(checkpoint_dir / "v25_last.pt", map_location="cpu")
+    assert checkpoint["epoch"] == 2

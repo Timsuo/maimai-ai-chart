@@ -74,6 +74,18 @@ class MaichartV25Dataset(Dataset):
         return self.codec.num_note_types
 
     @property
+    def num_start_pattern_types(self) -> int:
+        return self.codec.num_start_pattern_types
+
+    @property
+    def start_pattern_vocab(self) -> tuple[str, ...]:
+        return self.codec.start_pattern_vocab
+
+    @property
+    def num_chord_size_start_classes(self) -> int:
+        return self.codec.num_chord_size_start_classes
+
+    @property
     def note_type_vocab(self) -> tuple[str, ...]:
         return self.codec.note_types
 

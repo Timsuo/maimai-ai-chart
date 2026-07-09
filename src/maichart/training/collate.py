@@ -25,6 +25,9 @@ def collate_v25(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "buttons": samples[0]["y"]["buttons"].new_zeros((batch_size, max_len, 8)),
         "note_type": samples[0]["y"]["note_type"].new_zeros((batch_size, max_len)),
         "density": samples[0]["y"]["density"].new_zeros((batch_size, max_len, 1)),
+        "note_start": samples[0]["y"]["note_start"].new_zeros((batch_size, max_len, 1)),
+        "pattern_start": samples[0]["y"]["pattern_start"].new_full((batch_size, max_len), -100),
+        "chord_size_start": samples[0]["y"]["chord_size_start"].new_full((batch_size, max_len), -100),
     }
 
     for index, sample in enumerate(samples):

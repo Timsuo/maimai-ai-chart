@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from maichart.models.positional_encoding import (
@@ -17,6 +18,8 @@ from maichart.models.positional_encoding import (
 class MaichartTransformerV25Config:
     input_dim: int
     num_note_types: int
+    num_start_pattern_types: int = 11
+    num_chord_size_classes: int = 3
     d_model: int = 256
     nhead: int = 4
     num_layers: int = 4
@@ -24,6 +27,7 @@ class MaichartTransformerV25Config:
     dim_feedforward: int = 1024
     positional_encoding: str = "sinusoidal"
     max_len: int = 10000
+    density_nonnegative: bool = False
 
 
 class MaichartTransformerV25(nn.Module):
@@ -34,6 +38,8 @@ class MaichartTransformerV25(nn.Module):
         input_dim: int,
         num_note_types: int,
         *,
+        num_start_pattern_types: int = 11,
+        num_chord_size_classes: int = 3,
         d_model: int = 256,
         nhead: int = 4,
         num_layers: int = 4,
@@ -41,16 +47,23 @@ class MaichartTransformerV25(nn.Module):
         dim_feedforward: int = 1024,
         positional_encoding: str = "sinusoidal",
         max_len: int = 10000,
+        density_nonnegative: bool = False,
     ) -> None:
         super().__init__()
         if input_dim <= 0:
             raise ValueError("input_dim must be positive.")
         if num_note_types <= 0:
             raise ValueError("num_note_types must be positive.")
+        if num_start_pattern_types <= 0:
+            raise ValueError("num_start_pattern_types must be positive.")
+        if num_chord_size_classes <= 0:
+            raise ValueError("num_chord_size_classes must be positive.")
 
         self.config = MaichartTransformerV25Config(
             input_dim=input_dim,
             num_note_types=num_note_types,
+            num_start_pattern_types=num_start_pattern_types,
+            num_chord_size_classes=num_chord_size_classes,
             d_model=d_model,
             nhead=nhead,
             num_layers=num_layers,
@@ -58,6 +71,7 @@ class MaichartTransformerV25(nn.Module):
             dim_feedforward=dim_feedforward,
             positional_encoding=positional_encoding,
             max_len=max_len,
+            density_nonnegative=density_nonnegative,
         )
         self.input_projection = nn.Linear(input_dim, d_model)
         self.positional_encoding = _make_positional_encoding(
@@ -82,6 +96,9 @@ class MaichartTransformerV25(nn.Module):
         self.button_head = nn.Linear(d_model, 8)
         self.type_head = nn.Linear(d_model, num_note_types)
         self.density_head = nn.Linear(d_model, 1)
+        self.note_start_head = nn.Linear(d_model, 1)
+        self.pattern_start_head = nn.Linear(d_model, num_start_pattern_types)
+        self.chord_size_head = nn.Linear(d_model, num_chord_size_classes)
 
     def forward(
         self,
@@ -117,11 +134,18 @@ class MaichartTransformerV25(nn.Module):
         hidden = self.encoder(hidden, src_key_padding_mask=padding_mask)
         hidden = self.final_norm(hidden)
 
+        density_pred = self.density_head(hidden)
+        if self.config.density_nonnegative:
+            density_pred = F.softplus(density_pred)
+
         return {
             "note_presence_logits": self.note_presence_head(hidden),
             "button_logits": self.button_head(hidden),
             "type_logits": self.type_head(hidden),
-            "density_pred": self.density_head(hidden),
+            "density_pred": density_pred,
+            "note_start_logits": self.note_start_head(hidden),
+            "pattern_start_logits": self.pattern_start_head(hidden),
+            "chord_size_logits": self.chord_size_head(hidden),
         }
 
 
