@@ -1,3 +1,8 @@
+import csv
+import importlib.util
+import json
+from pathlib import Path
+
 from maichart import (
     SlideEvent,
     SlideSegment,
@@ -7,6 +12,7 @@ from maichart import (
     chart_ir_to_event_ir,
     frame_labels_to_dict,
     parse_maidata_metadata,
+    save_chart_json,
 )
 
 
@@ -178,6 +184,163 @@ def test_explicit_slide_launch_offset_is_respected() -> None:
     assert labels["frames"][1]["labels"]["slide_launch_offset_kinds"] == ["explicit"]
 
 
+def test_event_frame_labels_cache_builder_writes_side_path_cache(tmp_path) -> None:
+    builder = _load_cache_builder()
+    chart = _chart_ir_from_inote("{8}1/8,2h[8:1],1-4[8:1],A1,E")
+    chart_path = tmp_path / "cache_qc_fixed" / "chart_ir" / "song_a" / "difficulty_5.chart_ir.json"
+    chart_path.parent.mkdir(parents=True)
+    save_chart_json(chart, chart_path)
+
+    legacy_labels = frame_labels_to_dict(build_frame_labels_from_chart_ir(chart))
+    legacy_path = tmp_path / "cache_qc_fixed" / "frame_labels" / "song_a" / "difficulty_5.frame_labels.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(json.dumps(legacy_labels, ensure_ascii=False), encoding="utf-8")
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema": "maichart-training-manifest-v1",
+                "songs": [
+                    {
+                        "song_id": "song_a",
+                        "difficulties": [
+                            {
+                                "difficulty_index": 5,
+                                "usable_for_training": True,
+                                "chart_ir_path": str(chart_path),
+                                "frame_labels_path": "legacy/frame_labels.json",
+                            }
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = builder.build_event_frame_labels_cache(
+        manifest_path=manifest_path,
+        cache_dir=tmp_path / "cache_qc_fixed",
+        out_cache_dir=tmp_path / "cache_event_v2",
+        out_manifest_path=tmp_path / "manifest_event_v2.json",
+        division=16,
+        slide_launch_policy="legacy",
+    )
+
+    out_manifest = json.loads((tmp_path / "manifest_event_v2.json").read_text(encoding="utf-8"))
+    difficulty = out_manifest["songs"][0]["difficulties"][0]
+    labels_path = tmp_path / difficulty["event_frame_labels_path"]
+    event_ir_path = (
+        tmp_path
+        / "cache_event_v2"
+        / "event_ir"
+        / "song_a"
+        / "difficulty_5.event_ir.json"
+    )
+    v2 = json.loads(labels_path.read_text(encoding="utf-8"))
+
+    assert event_ir_path.is_file()
+    assert labels_path.is_file()
+    assert difficulty["frame_labels_path"] == "legacy/frame_labels.json"
+    assert difficulty["event_frame_labels_schema"] == "maichart-frame-labels-v2"
+    assert difficulty["event_frame_labels_policy"] == "legacy"
+    assert result["summary"]["written_event_ir_count"] == 1
+    assert result["summary"]["written_frame_labels_v2_count"] == 1
+
+    for frame_index, v1_frame in enumerate(legacy_labels["frames"]):
+        v1_labels = v1_frame["labels"]
+        v2_labels = v2["frames"][frame_index]["labels"]
+        for key in _legacy_alignment_keys():
+            assert v2_labels[key] == v1_labels[key]
+
+
+def test_event_frame_labels_cache_builder_unknown_policy_summary(tmp_path) -> None:
+    builder = _load_cache_builder()
+    chart_path = tmp_path / "cache_qc_fixed" / "chart_ir" / "song_slide" / "difficulty_5.chart_ir.json"
+    chart_path.parent.mkdir(parents=True)
+    save_chart_json(_chart_ir_from_inote("{8}1-4[8:1],E"), chart_path)
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {
+                "song_id": "song_slide",
+                "difficulty_index": 5,
+                "chart_ir_path": str(chart_path),
+            }
+        ],
+    )
+
+    result = builder.build_event_frame_labels_cache(
+        manifest_path=manifest_path,
+        cache_dir=tmp_path / "cache_qc_fixed",
+        out_cache_dir=tmp_path / "cache_event_v2",
+        out_manifest_path=tmp_path / "manifest_event_v2.json",
+        division=16,
+        slide_launch_policy="unknown",
+    )
+
+    summary = result["summary"]
+    assert summary["slide_launch_policy"] == "unknown"
+    assert summary["total_slide_heads"] == 1
+    assert summary["total_slide_unknown_launch_offset_count"] == 1
+    assert summary["unknown_launch_offset_per_slide_head"] == 1.0
+
+    summary_csv = tmp_path / "cache_event_v2" / "event_frame_labels_build_summary.csv"
+    with summary_csv.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["slide_launch_policy"] == "unknown"
+
+
+def test_event_frame_labels_cache_builder_records_errors_without_stopping(tmp_path) -> None:
+    builder = _load_cache_builder()
+    good_chart_path = (
+        tmp_path / "cache_qc_fixed" / "chart_ir" / "good_song" / "difficulty_5.chart_ir.json"
+    )
+    good_chart_path.parent.mkdir(parents=True)
+    save_chart_json(_chart_ir_from_inote("{8}1,E"), good_chart_path)
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {
+                "song_id": "good_song",
+                "difficulty_index": 5,
+                "chart_ir_path": str(good_chart_path),
+            },
+            {
+                "song_id": "bad_song",
+                "difficulty_index": 5,
+                "chart_ir_path": str(tmp_path / "missing.chart_ir.json"),
+            },
+        ],
+    )
+
+    result = builder.build_event_frame_labels_cache(
+        manifest_path=manifest_path,
+        cache_dir=tmp_path / "cache_qc_fixed",
+        out_cache_dir=tmp_path / "cache_event_v2",
+        out_manifest_path=tmp_path / "manifest_event_v2.json",
+        division=16,
+        slide_launch_policy="legacy",
+    )
+
+    out_manifest = json.loads((tmp_path / "manifest_event_v2.json").read_text(encoding="utf-8"))
+    good = out_manifest["songs"][0]["difficulties"][0]
+    bad = out_manifest["songs"][1]["difficulties"][0]
+    assert result["summary"]["sample_count"] == 2
+    assert result["summary"]["written_frame_labels_v2_count"] == 1
+    assert result["summary"]["error_count"] == 1
+    assert "event_frame_labels_path" in good
+    assert "event_frame_labels_path" not in bad
+
+    errors_path = tmp_path / "cache_event_v2" / "event_frame_labels_build_errors.csv"
+    with errors_path.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["song_id"] == "bad_song"
+    assert rows[0]["error_type"] == "FileNotFoundError"
+
+
 def _event_labels_from_inote(inote: str, *, slide_launch_policy: str = "legacy") -> dict:
     return build_frame_labels_from_event_ir(
         _event_ir_from_inote(inote),
@@ -198,3 +361,62 @@ def _chart_ir_from_inote(inote: str):
         f"&inote_5={inote}\n"
     )
     return build_chart_ir_by_difficulty_index(parse_maidata_metadata(raw), 5)
+
+
+def _load_cache_builder():
+    path = Path(__file__).resolve().parents[1] / "tools" / "build_event_frame_labels_cache.py"
+    spec = importlib.util.spec_from_file_location("build_event_frame_labels_cache", path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_manifest(tmp_path: Path, samples: list[dict]) -> Path:
+    songs = []
+    for sample in samples:
+        songs.append(
+            {
+                "song_id": sample["song_id"],
+                "difficulties": [
+                    {
+                        "difficulty_index": sample["difficulty_index"],
+                        "usable_for_training": True,
+                        "chart_ir_path": sample["chart_ir_path"],
+                        "frame_labels_path": f"legacy/{sample['song_id']}.frame_labels.json",
+                    }
+                ],
+            }
+        )
+    path = tmp_path / "manifest.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "maichart-training-manifest-v1",
+                "songs": songs,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _legacy_alignment_keys() -> tuple[str, ...]:
+    return (
+        "has_note",
+        "note_count",
+        "tap_count",
+        "break_count",
+        "hold_start_count",
+        "hold_active_count",
+        "slide_start_count",
+        "slide_active_count",
+        "touch_count",
+        "touch_hold_start_count",
+        "note_types",
+        "positions",
+        "slide_patterns",
+        "duration_kinds",
+    )

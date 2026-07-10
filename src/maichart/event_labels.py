@@ -129,8 +129,9 @@ def _apply_event_to_frames(
         if labels is None:
             return
         _apply_note_start(labels, "hold", event.position)
+        _apply_break_modifier(labels, event.modifiers)
         labels["hold_start_count"] += 1
-        _append_unique_kind(labels["duration_kinds"], event.duration_kind)
+        _append_known_kind(labels["duration_kinds"], event.duration_kind)
         duration_ticks = _duration_ticks_for_event(
             chart=chart,
             tick=event.head_tick,
@@ -156,6 +157,7 @@ def _apply_event_to_frames(
         if labels is None:
             return
         _apply_note_start(labels, "touch", event.position)
+        _apply_break_modifier(labels, event.modifiers)
         labels["touch_count"] += 1
         return
 
@@ -164,8 +166,9 @@ def _apply_event_to_frames(
         if labels is None:
             return
         _apply_note_start(labels, "touch_hold", event.position)
+        _apply_break_modifier(labels, event.modifiers)
         labels["touch_hold_start_count"] += 1
-        _append_unique_kind(labels["duration_kinds"], event.duration_kind)
+        _append_known_kind(labels["duration_kinds"], event.duration_kind)
         duration_ticks = _duration_ticks_for_event(
             chart=chart,
             tick=event.head_tick,
@@ -194,12 +197,13 @@ def _apply_slide_event(
         return
 
     _apply_note_start(head_labels, "slide", event.start_position)
+    _apply_break_modifier(head_labels, event.head_modifiers)
     head_labels["slide_start_count"] += 1
     head_labels["slide_head_count"] += 1
+    _append_known_kind(head_labels["duration_kinds"], event.duration_kind)
     for segment in event.segments:
         _append_unique(head_labels["slide_patterns"], segment.path_type)
-        _append_unique_kind(head_labels["duration_kinds"], segment.duration_kind)
-    _append_unique_kind(head_labels["duration_kinds"], event.duration_kind)
+        _append_known_kind(head_labels["duration_kinds"], segment.duration_kind)
     _append_unique_kind(
         head_labels["slide_travel_duration_kinds"],
         _travel_duration_kind(event),
@@ -276,6 +280,11 @@ def _apply_note_start(labels: dict[str, Any], note_type: str, position: str) -> 
     labels["note_start_count"] += 1
     _append_unique(labels["note_types"], note_type)
     _append_unique(labels["positions"], position)
+
+
+def _apply_break_modifier(labels: dict[str, Any], modifiers: dict[str, Any]) -> None:
+    if modifiers.get("break"):
+        labels["break_count"] += 1
 
 
 def _resolve_slide_launch(
@@ -455,3 +464,8 @@ def _append_unique(values: list[str], value: str) -> None:
 
 def _append_unique_kind(values: list[str], value: str | None) -> None:
     _append_unique(values, value or "unknown")
+
+
+def _append_known_kind(values: list[str], value: str | None) -> None:
+    if value is not None:
+        _append_unique(values, value)
