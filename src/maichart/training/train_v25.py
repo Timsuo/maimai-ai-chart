@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Subset
 
 from maichart.models.transformer_v25 import MaichartTransformerV25
 from maichart.training.collate import collate_v25
-from maichart.training.dataset_v25 import MaichartV25Dataset, TrainingDataError
+from maichart.training.dataset_v25 import FEATURE_SETS, MaichartV25Dataset, TrainingDataError
 from maichart.training.evaluate_v25 import compute_v25_metrics
 from maichart.training.losses_v25 import compute_v25_losses
 from maichart.training.frame_label_codec import (
@@ -35,9 +35,17 @@ def main(argv: list[str] | None = None) -> int:
     _set_reproducibility(args.seed, deterministic=args.deterministic)
 
     try:
-        dataset = MaichartV25Dataset(args.manifest, cache_dir=args.cache_dir)
+        dataset = MaichartV25Dataset(
+            args.manifest,
+            cache_dir=args.cache_dir,
+            feature_set=args.feature_set,
+        )
         val_dataset = (
-            MaichartV25Dataset(args.val_manifest, cache_dir=args.cache_dir)
+            MaichartV25Dataset(
+                args.val_manifest,
+                cache_dir=args.cache_dir,
+                feature_set=args.feature_set,
+            )
             if args.val_manifest
             else None
         )
@@ -58,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     train_dataset = Subset(dataset, [selected_index]) if args.overfit_one_sample else dataset
     print(
         "V2.5 dataset: "
+        f"feature_set={dataset.feature_set} "
         f"samples={len(dataset)} train_samples={len(train_dataset)} "
         f"val_samples={len(val_dataset) if val_dataset is not None else 0} "
         f"input_dim={dataset.input_dim} "
@@ -131,16 +140,24 @@ def main(argv: list[str] | None = None) -> int:
     epochs_without_val_improvement = 0
     last_epoch = 0
     try:
-        note_pos_weight, button_pos_weight, pattern_class_weight, chord_class_weight = (
-            _resolve_training_weights(args, train_dataset)
-        )
+        (
+            note_pos_weight,
+            button_pos_weight,
+            note_start_pos_weight,
+            pattern_class_weight,
+            chord_class_weight,
+        ) = _resolve_training_weights(args, train_dataset)
     except TrainingDataError as exc:
         parser.error(str(exc))
     print(
         f"Loss pos_weight: note={_format_pos_weight(note_pos_weight)} "
-        f"buttons={_format_pos_weight(button_pos_weight)}",
+        f"buttons={_format_pos_weight(button_pos_weight)} "
+        f"note_start={_format_pos_weight(note_start_pos_weight)}",
         flush=True,
     )
+    args.resolved_note_start_pos_weight = _serializable_weight(note_start_pos_weight)
+    args.resolved_note_pos_weight = _serializable_weight(note_pos_weight)
+    args.resolved_button_pos_weight = _serializable_weight(button_pos_weight)
     print(
         f"Loss class_weight: pattern={_format_pos_weight(pattern_class_weight)} "
         f"chord={_format_pos_weight(chord_class_weight)}",
@@ -149,8 +166,10 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "Run config: "
         f"seed={args.seed} deterministic={args.deterministic} device={device} "
+        f"feature_set={args.feature_set} input_dim={dataset.input_dim} "
         f"note_pos_weight={_format_pos_weight(note_pos_weight)} "
         f"button_pos_weight={_format_pos_weight(button_pos_weight)} "
+        f"note_start_pos_weight={_format_pos_weight(note_start_pos_weight)} "
         f"pattern_class_weight={_format_pos_weight(pattern_class_weight)} "
         f"chord_class_weight={_format_pos_weight(chord_class_weight)} "
         f"note_start_weight={args.note_start_weight:.4f} "
@@ -172,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
                 pattern_class_weight=pattern_class_weight,
                 chord_class_weight=chord_class_weight,
                 note_start_weight=args.note_start_weight,
+                note_start_pos_weight=note_start_pos_weight,
                 pattern_start_weight=args.pattern_start_weight,
                 chord_size_weight=args.chord_size_weight,
             )
@@ -202,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
                     pattern_class_weight=pattern_class_weight,
                     chord_class_weight=chord_class_weight,
                     note_start_weight=args.note_start_weight,
+                    note_start_pos_weight=note_start_pos_weight,
                     pattern_start_weight=args.pattern_start_weight,
                     chord_size_weight=args.chord_size_weight,
                 )
@@ -264,6 +285,7 @@ def _train_epoch(
     pattern_class_weight: torch.Tensor | None,
     chord_class_weight: torch.Tensor | None,
     note_start_weight: float,
+    note_start_pos_weight: float | torch.Tensor | None,
     pattern_start_weight: float,
     chord_size_weight: float,
 ) -> dict[str, float]:
@@ -297,6 +319,7 @@ def _train_epoch(
             pattern_class_weight=pattern_class_weight,
             chord_class_weight=chord_class_weight,
             note_start_weight=note_start_weight,
+            note_start_pos_weight=note_start_pos_weight,
             pattern_start_weight=pattern_start_weight,
             chord_size_weight=chord_size_weight,
         )
@@ -320,6 +343,7 @@ def _evaluate_epoch(
     pattern_class_weight: torch.Tensor | None,
     chord_class_weight: torch.Tensor | None,
     note_start_weight: float,
+    note_start_pos_weight: float | torch.Tensor | None,
     pattern_start_weight: float,
     chord_size_weight: float,
 ) -> dict[str, float]:
@@ -361,6 +385,7 @@ def _evaluate_epoch(
                 pattern_class_weight=pattern_class_weight,
                 chord_class_weight=chord_class_weight,
                 note_start_weight=note_start_weight,
+                note_start_pos_weight=note_start_pos_weight,
                 pattern_start_weight=pattern_start_weight,
                 chord_size_weight=chord_size_weight,
             )
@@ -430,11 +455,16 @@ def _resolve_training_weights(
 ) -> tuple[
     float | torch.Tensor | None,
     float | torch.Tensor | str | None,
+    float | torch.Tensor | None,
     torch.Tensor | None,
     torch.Tensor | None,
 ]:
     note_pos_weight = _parse_pos_weight_arg(args.note_pos_weight, name="--note-pos-weight")
     button_pos_weight = _parse_pos_weight_arg(args.button_pos_weight, name="--button-pos-weight")
+    note_start_pos_weight = _parse_pos_weight_arg(
+        args.note_start_pos_weight,
+        name="--note-start-pos-weight",
+    )
     pattern_class_weight_arg = _parse_class_weight_arg(
         args.pattern_class_weight,
         name="--pattern-class-weight",
@@ -446,6 +476,7 @@ def _resolve_training_weights(
     if (
         note_pos_weight == "auto"
         or button_pos_weight == "auto"
+        or note_start_pos_weight == "auto"
         or pattern_class_weight_arg == "sqrt_auto"
         or chord_class_weight_arg == "sqrt_auto"
     ):
@@ -454,6 +485,11 @@ def _resolve_training_weights(
         stats = None
     if note_pos_weight == "auto":
         note_pos_weight = _neg_pos_ratio(stats["note_positive"], stats["note_total"])
+    if note_start_pos_weight == "auto":
+        note_start_pos_weight = _neg_pos_ratio(
+            stats["note_start_positive"],
+            stats["note_start_total"],
+        )
     if button_pos_weight == "auto":
         positives = stats["button_positive"]
         totals = stats["button_total"]
@@ -475,7 +511,13 @@ def _resolve_training_weights(
             stats["chord_size_counts"],
             cap=args.chord_class_weight_cap,
         )
-    return note_pos_weight, button_pos_weight, pattern_class_weight, chord_class_weight
+    return (
+        note_pos_weight,
+        button_pos_weight,
+        note_start_pos_weight,
+        pattern_class_weight,
+        chord_class_weight,
+    )
 
 
 def _parse_pos_weight_arg(value: str | None, *, name: str) -> float | str | None:
@@ -509,6 +551,8 @@ def _parse_class_weight_arg(value: str | None, *, name: str) -> str | None:
 def _count_training_targets(train_dataset) -> dict[str, torch.Tensor]:
     note_positive = torch.tensor(0.0)
     note_total = torch.tensor(0.0)
+    note_start_positive = torch.tensor(0.0)
+    note_start_total = torch.tensor(0.0)
     button_positive = torch.zeros(8, dtype=torch.float32)
     button_total = torch.zeros(8, dtype=torch.float32)
     pattern_start_counts = torch.zeros(len(START_PATTERN_TYPES), dtype=torch.float32)
@@ -516,11 +560,14 @@ def _count_training_targets(train_dataset) -> dict[str, torch.Tensor]:
     for index in range(len(train_dataset)):
         sample = train_dataset[index]
         note = sample["y"]["note_presence"].float()
+        note_start = sample["y"]["note_start"].float()
         buttons = sample["y"]["buttons"].float()
         pattern_start = sample["y"]["pattern_start"]
         chord_size_start = sample["y"]["chord_size_start"]
         note_positive += note.sum()
         note_total += torch.tensor(float(note.numel()))
+        note_start_positive += note_start.sum()
+        note_start_total += torch.tensor(float(note_start.numel()))
         button_positive += buttons.sum(dim=0)
         button_total += torch.full((8,), float(buttons.size(0)))
         pattern_start_counts += _count_valid_classes(pattern_start, len(START_PATTERN_TYPES))
@@ -528,6 +575,8 @@ def _count_training_targets(train_dataset) -> dict[str, torch.Tensor]:
     return {
         "note_positive": note_positive,
         "note_total": note_total,
+        "note_start_positive": note_start_positive,
+        "note_start_total": note_start_total,
         "button_positive": button_positive,
         "button_total": button_total,
         "pattern_start_counts": pattern_start_counts,
@@ -572,6 +621,15 @@ def _format_pos_weight(value: float | torch.Tensor | str | None) -> str:
     return f"{float(value):.4f}"
 
 
+def _serializable_weight(value: float | torch.Tensor | str | None):
+    if isinstance(value, torch.Tensor):
+        values = value.detach().cpu().reshape(-1).tolist()
+        return [float(item) for item in values]
+    if value is None or isinstance(value, str):
+        return value
+    return float(value)
+
+
 def _is_improvement(value: float, best: float, *, min_delta: float) -> bool:
     return value < best - min_delta
 
@@ -589,6 +647,16 @@ def _save_checkpoint(
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "model_config": _config_to_dict(model.config),
+            "data_config": {
+                "feature_set": args.feature_set,
+                "input_dim": model.config.input_dim,
+            },
+            "feature_set": args.feature_set,
+            "input_dim": model.config.input_dim,
+            "loss_config": {
+                "note_start_pos_weight": getattr(args, "resolved_note_start_pos_weight", args.note_start_pos_weight),
+                "note_start_weight": args.note_start_weight,
+            },
             "seed": args.seed,
             "deterministic": args.deterministic,
             "train_args": vars(args),
@@ -703,6 +771,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", required=True, help="Training manifest JSON path.")
     parser.add_argument("--val-manifest", help="Validation training manifest JSON path.")
     parser.add_argument("--cache-dir", default="cache", help="Cache root directory.")
+    parser.add_argument("--feature-set", choices=FEATURE_SETS, default="audio7")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--val-batch-size", type=int)
@@ -725,6 +794,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--chord-class-weight", choices=("none", "sqrt_auto"), default="sqrt_auto")
     parser.add_argument("--chord-class-weight-cap", type=float, default=10.0)
     parser.add_argument("--note-start-weight", type=float, default=1.0)
+    parser.add_argument("--note-start-pos-weight", default="1.0")
     parser.add_argument("--pattern-start-weight", type=float, default=0.5)
     parser.add_argument("--chord-size-weight", type=float, default=0.5)
     parser.add_argument("--density-nonnegative", action="store_true")

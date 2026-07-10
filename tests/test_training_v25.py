@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -9,10 +10,16 @@ torch = pytest.importorskip("torch")
 
 from maichart.models.transformer_v25 import MaichartTransformerV25
 from maichart.training.collate import collate_v25
-from maichart.training.dataset_v25 import MaichartV25Dataset
-from maichart.training.evaluate_v25 import compute_v25_metrics, compute_v25_pattern_details
+from maichart.training.dataset_v25 import MaichartV25Dataset, TrainingDataError
+from maichart.training.evaluate_v25 import (
+    _model_from_checkpoint,
+    _resolve_checkpoint_feature_set,
+    compute_v25_metrics,
+    compute_v25_pattern_details,
+)
 from maichart.training.frame_label_codec import START_PATTERN_IGNORE_INDEX, START_PATTERN_TO_ID
 from maichart.training.losses_v25 import compute_v25_losses
+from maichart.training.train_v25 import _resolve_training_weights
 
 
 def test_v25_minimal_dataset_collate_forward_loss_and_metrics(tmp_path) -> None:
@@ -20,6 +27,8 @@ def test_v25_minimal_dataset_collate_forward_loss_and_metrics(tmp_path) -> None:
     dataset = MaichartV25Dataset(manifest, cache_dir=tmp_path / "cache")
 
     sample = dataset[0]
+    assert dataset.feature_dim == 7
+    assert dataset.input_dim == 7
     assert sample["meta"]["song_id"] == "song001"
     assert sample["meta"]["difficulty_index"] == 4
     assert sample["x"].shape == (4, dataset.input_dim)
@@ -114,6 +123,78 @@ def test_v25_minimal_dataset_collate_forward_loss_and_metrics(tmp_path) -> None:
     assert len(details["pattern_start"]["confusion_matrix"]) == dataset.num_start_pattern_types
     assert details["chord_size"]["total_count"] == 2
     assert len(details["chord_size"]["per_class"]) == dataset.num_chord_size_start_classes
+
+
+def test_v25_audio7_plus_grid_feature_dim_and_values_are_finite(tmp_path) -> None:
+    manifest = _write_minimal_v25_cache(tmp_path)
+    dataset = MaichartV25Dataset(
+        manifest,
+        cache_dir=tmp_path / "cache",
+        feature_set="audio7_plus_grid",
+    )
+
+    sample = dataset[0]
+    assert dataset.feature_dim == 15
+    assert dataset.input_dim == 15
+    assert sample["x"].shape == (4, 15)
+    assert torch.isfinite(sample["x"]).all()
+    assert sample["meta"]["feature_set"] == "audio7_plus_grid"
+    assert sample["x"][0, -3:].tolist() == pytest.approx([120 / 240, 4 / 5, 12 / 15])
+
+
+def test_v25_note_start_pos_weight_fixed_and_auto(tmp_path) -> None:
+    manifest = _write_minimal_v25_cache(tmp_path)
+    dataset = MaichartV25Dataset(manifest, cache_dir=tmp_path / "cache")
+    args = Namespace(
+        note_pos_weight="1.0",
+        button_pos_weight="none",
+        note_start_pos_weight="2.5",
+        pattern_class_weight="none",
+        chord_class_weight="none",
+        pattern_class_weight_cap=10.0,
+        chord_class_weight_cap=10.0,
+    )
+
+    weights = _resolve_training_weights(args, dataset)
+    assert weights[2] == pytest.approx(2.5)
+
+    args.note_start_pos_weight = "auto"
+    weights = _resolve_training_weights(args, dataset)
+    assert weights[2] == pytest.approx(1.0)
+
+
+def test_v25_evaluate_restores_feature_set_and_rejects_input_dim_mismatch(tmp_path) -> None:
+    manifest = _write_minimal_v25_cache(tmp_path)
+    grid_dataset = MaichartV25Dataset(
+        manifest,
+        cache_dir=tmp_path / "cache",
+        feature_set="audio7_plus_grid",
+    )
+    checkpoint = {
+        "model_state_dict": {},
+        "model_config": {
+            "input_dim": 15,
+            "num_note_types": grid_dataset.num_note_types,
+            "d_model": 32,
+            "nhead": 4,
+            "num_layers": 1,
+            "dim_feedforward": 64,
+            "dropout": 0.0,
+        },
+        "data_config": {"feature_set": "audio7_plus_grid", "input_dim": 15},
+    }
+
+    assert _resolve_checkpoint_feature_set(checkpoint, None) == "audio7_plus_grid"
+    assert _resolve_checkpoint_feature_set(checkpoint, "audio7_plus_grid") == "audio7_plus_grid"
+    with pytest.raises(TrainingDataError, match="feature_set mismatch"):
+        _resolve_checkpoint_feature_set(checkpoint, "audio7")
+
+    model = _model_from_checkpoint(checkpoint, grid_dataset)
+    assert model.config.input_dim == 15
+
+    audio_dataset = MaichartV25Dataset(manifest, cache_dir=tmp_path / "cache")
+    with pytest.raises(TrainingDataError, match="Checkpoint input_dim mismatch"):
+        _model_from_checkpoint(checkpoint, audio_dataset)
 
 
 def test_v25_losses_handle_batch_without_note_starts() -> None:

@@ -77,6 +77,8 @@ def test_v25_overfit_one_sample_train_entrypoint_starts(tmp_path) -> None:
             str(Path("manifests") / "training_manifest_limit2.json"),
             "--cache-dir",
             "cache",
+            "--feature-set",
+            "audio7_plus_grid",
             "--epochs",
             "1",
             "--batch-size",
@@ -88,6 +90,8 @@ def test_v25_overfit_one_sample_train_entrypoint_starts(tmp_path) -> None:
             str(checkpoint_dir),
             "--save-every",
             "0",
+            "--note-start-pos-weight",
+            "auto",
             "--d-model",
             "32",
             "--nhead",
@@ -101,6 +105,12 @@ def test_v25_overfit_one_sample_train_entrypoint_starts(tmp_path) -> None:
         ]
     ) == 0
     assert (checkpoint_dir / "v25_last.pt").is_file()
+    checkpoint = torch.load(checkpoint_dir / "v25_last.pt", map_location="cpu")
+    assert checkpoint["data_config"]["feature_set"] == "audio7_plus_grid"
+    assert checkpoint["data_config"]["input_dim"] == 15
+    assert checkpoint["feature_set"] == "audio7_plus_grid"
+    assert checkpoint["input_dim"] == 15
+    assert checkpoint["loss_config"]["note_start_pos_weight"] is not None
 
 
 def test_v25_train_entrypoint_logs_validation_and_early_stops(tmp_path) -> None:
@@ -168,3 +178,5 @@ def test_v25_train_entrypoint_logs_validation_and_early_stops(tmp_path) -> None:
 
     checkpoint = torch.load(checkpoint_dir / "v25_last.pt", map_location="cpu")
     assert checkpoint["epoch"] == 2
+    assert checkpoint["data_config"]["feature_set"] == "audio7"
+    assert checkpoint["data_config"]["input_dim"] == 7

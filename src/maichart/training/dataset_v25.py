@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import bisect
 import json
+import math
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,17 @@ AUDIO_FEATURE_KEYS = (
     "spectral_bandwidth",
     "zero_crossing_rate",
 )
+GRID_FEATURE_KEYS = (
+    "beat_phase_sin",
+    "beat_phase_cos",
+    "bar_phase_sin",
+    "bar_phase_cos",
+    "song_progress",
+    "local_bpm_norm",
+    "difficulty_norm",
+    "level_norm",
+)
+FEATURE_SETS = ("audio7", "audio7_plus_grid")
 
 
 class TrainingDataError(RuntimeError):
@@ -52,7 +65,9 @@ class MaichartV25Dataset(Dataset):
         codec: FrameLabelCodec | None = None,
         include_unusable: bool = False,
         load_chart_ir: bool = False,
+        feature_set: str = "audio7",
     ) -> None:
+        self.feature_set = _normalize_feature_set(feature_set)
         self.manifest_path = Path(manifest_path).resolve()
         self.manifest_base = self.manifest_path.parent
         self.cache_dir = Path(cache_dir).resolve()
@@ -67,7 +82,13 @@ class MaichartV25Dataset(Dataset):
 
     @property
     def input_dim(self) -> int:
-        return len(AUDIO_FEATURE_KEYS)
+        return self.feature_dim
+
+    @property
+    def feature_dim(self) -> int:
+        if self.feature_set == "audio7":
+            return len(AUDIO_FEATURE_KEYS)
+        return len(AUDIO_FEATURE_KEYS) + len(GRID_FEATURE_KEYS)
 
     @property
     def num_note_types(self) -> int:
@@ -118,7 +139,14 @@ class MaichartV25Dataset(Dataset):
                 "'feature_frames'."
             )
 
-        x = _align_audio_to_label_frames(feature_frames, frames, ref.audio_features_path)
+        x = _align_audio_to_label_frames(
+            feature_frames,
+            frames,
+            ref.audio_features_path,
+            feature_set=self.feature_set,
+            audio_features=audio_features,
+            ref=ref,
+        )
         y = self.codec.encode_frames(frames)
         if x.size(0) != y["note_presence"].size(0):
             raise TrainingDataError(
@@ -139,6 +167,7 @@ class MaichartV25Dataset(Dataset):
                 "chart_ir_path": str(ref.chart_ir_path),
                 "alignment_summary": alignment_report.get("summary"),
                 "chart_ir": chart_ir,
+                "feature_set": self.feature_set,
             },
         }
 
@@ -222,24 +251,160 @@ def _align_audio_to_label_frames(
     audio_frames: list[dict[str, Any]],
     label_frames: list[dict[str, Any]],
     audio_path: Path,
+    *,
+    feature_set: str = "audio7",
+    audio_features: dict[str, Any] | None = None,
+    ref: TrainingSampleRef | None = None,
 ) -> torch.Tensor:
+    feature_set = _normalize_feature_set(feature_set)
     audio_times = [float(frame.get("time_sec") or 0.0) for frame in audio_frames]
     vectors: list[list[float]] = []
+    grid_context = _grid_context(audio_features or {}, label_frames, ref)
     for frame in label_frames:
         time_sec = frame.get("time_sec")
         if time_sec is None:
-            vectors.append([0.0] * len(AUDIO_FEATURE_KEYS))
-            continue
-        audio_frame = audio_frames[_nearest_index(audio_times, float(time_sec))]
-        try:
-            vectors.append([_feature_value(audio_frame, key) for key in AUDIO_FEATURE_KEYS])
-        except KeyError as exc:
-            raise TrainingDataError(
-                f"{audio_path} feature frame is missing required key {exc.args[0]!r}."
-            ) from exc
+            vector = [0.0] * len(AUDIO_FEATURE_KEYS)
+        else:
+            audio_frame = audio_frames[_nearest_index(audio_times, float(time_sec))]
+            try:
+                vector = [_feature_value(audio_frame, key) for key in AUDIO_FEATURE_KEYS]
+            except KeyError as exc:
+                raise TrainingDataError(
+                    f"{audio_path} feature frame is missing required key {exc.args[0]!r}."
+                ) from exc
+        if feature_set == "audio7_plus_grid":
+            vector.extend(_grid_feature_values(frame, grid_context))
+        vectors.append(vector)
     if not vectors:
         raise TrainingDataError("frame_labels.json contains no frames.")
     return torch.tensor(vectors, dtype=torch.float32)
+
+
+def _normalize_feature_set(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in FEATURE_SETS:
+        raise TrainingDataError(
+            f"Unsupported feature_set={value!r}; expected one of: {', '.join(FEATURE_SETS)}."
+        )
+    return normalized
+
+
+def _grid_context(
+    audio_features: dict[str, Any],
+    label_frames: list[dict[str, Any]],
+    ref: TrainingSampleRef | None,
+) -> dict[str, float]:
+    grid = audio_features.get("grid") if isinstance(audio_features.get("grid"), dict) else {}
+    if not grid:
+        for frame in label_frames:
+            candidate = frame.get("grid")
+            if isinstance(candidate, dict):
+                grid = candidate
+                break
+    difficulty = float(ref.difficulty_index if ref is not None else _frame_difficulty(label_frames))
+    level = ref.level if ref is not None else None
+    return {
+        "total_frames": float(len(label_frames)),
+        "ticks_per_beat": _float_or_none(grid.get("ticks_per_beat")) or _ticks_per_beat(label_frames),
+        "local_bpm_norm": _default_bpm(audio_features, ref) / 240.0,
+        "difficulty_norm": difficulty / 5.0,
+        "level_norm": (float(level) / 15.0) if level is not None else (difficulty / 5.0),
+    }
+
+
+def _grid_feature_values(frame: dict[str, Any], context: dict[str, float]) -> list[float]:
+    beat = _beat_value(frame, context["ticks_per_beat"])
+    beat_phase = beat % 1.0
+    # Frame labels do not carry a meter map yet, so bar phase is a 4/4 fallback.
+    bar_phase = (beat % 4.0) / 4.0
+    frame_index = _float_or_none(frame.get("frame_index")) or 0.0
+    song_progress = frame_index / max(context["total_frames"] - 1.0, 1.0)
+    song_progress = min(1.0, max(0.0, song_progress))
+    return [
+        math.sin(2.0 * math.pi * beat_phase),
+        math.cos(2.0 * math.pi * beat_phase),
+        math.sin(2.0 * math.pi * bar_phase),
+        math.cos(2.0 * math.pi * bar_phase),
+        song_progress,
+        context["local_bpm_norm"],
+        context["difficulty_norm"],
+        context["level_norm"],
+    ]
+
+
+def _beat_value(frame: dict[str, Any], ticks_per_beat: float) -> float:
+    beat = _float_or_none(frame.get("beat"))
+    if beat is not None:
+        return beat
+    tick = _float_or_none(frame.get("tick"))
+    if tick is not None and ticks_per_beat > 0:
+        return tick / ticks_per_beat
+    return 0.0
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str) and "/" in value:
+            return float(Fraction(value))
+        return float(value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _ticks_per_beat(label_frames: list[dict[str, Any]]) -> float:
+    previous_tick = None
+    previous_beat = None
+    for frame in label_frames:
+        grid = frame.get("grid")
+        if isinstance(grid, dict):
+            value = _float_or_none(grid.get("ticks_per_beat"))
+            if value is not None and value > 0:
+                return value
+        tick = _float_or_none(frame.get("tick"))
+        beat = _float_or_none(frame.get("beat"))
+        if tick is not None and beat is not None:
+            if previous_tick is not None and previous_beat is not None:
+                tick_delta = tick - previous_tick
+                beat_delta = beat - previous_beat
+                if tick_delta > 0 and beat_delta > 0:
+                    return tick_delta / beat_delta
+            previous_tick = tick
+            previous_beat = beat
+    return 1920.0
+
+
+def _frame_difficulty(label_frames: list[dict[str, Any]]) -> float:
+    for frame in label_frames:
+        value = _float_or_none(frame.get("difficulty"))
+        if value is not None:
+            return value
+    return 0.0
+
+
+def _default_bpm(audio_features: dict[str, Any], ref: TrainingSampleRef | None) -> float:
+    candidates: list[Any] = [
+        audio_features.get("tempo_bpm"),
+        audio_features.get("bpm"),
+        audio_features.get("estimated_bpm"),
+    ]
+    if ref is not None:
+        audio = ref.manifest_song.get("audio")
+        if isinstance(audio, dict):
+            candidates.extend([audio.get("estimated_bpm"), audio.get("metadata_bpm")])
+        candidates.extend(
+            [
+                ref.manifest_song.get("estimated_bpm"),
+                ref.manifest_song.get("bpm"),
+                ref.manifest_difficulty.get("bpm"),
+            ]
+        )
+    for value in candidates:
+        bpm = _float_or_none(value)
+        if bpm is not None and bpm > 0:
+            return bpm
+    return 120.0
 
 
 def _nearest_index(values: list[float], target: float) -> int:

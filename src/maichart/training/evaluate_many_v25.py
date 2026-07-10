@@ -12,11 +12,12 @@ from typing import Any
 import torch
 
 from maichart.training.collate import collate_v25
-from maichart.training.dataset_v25 import MaichartV25Dataset, TrainingDataError
+from maichart.training.dataset_v25 import FEATURE_SETS, MaichartV25Dataset, TrainingDataError
 from maichart.training.evaluate_v25 import (
     _load_checkpoint,
     _load_model_state_dict,
     _model_from_checkpoint,
+    _resolve_checkpoint_feature_set,
     _with_flat_detail_aliases,
     compute_v25_pattern_details,
     compute_v25_metrics,
@@ -75,9 +76,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        dataset = MaichartV25Dataset(args.manifest, cache_dir=args.cache_dir)
         device = resolve_device(args.device)
         checkpoint = _load_checkpoint(Path(args.checkpoint), device)
+        feature_set = _resolve_checkpoint_feature_set(checkpoint, args.feature_set)
+        dataset = MaichartV25Dataset(
+            args.manifest,
+            cache_dir=args.cache_dir,
+            feature_set=feature_set,
+        )
         model = _model_from_checkpoint(checkpoint, dataset).to(device)
         _load_model_state_dict(model, checkpoint)
         model.eval()
@@ -280,6 +286,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, help="Training manifest JSON path.")
     parser.add_argument("--cache-dir", default="cache", help="Cache root directory.")
+    parser.add_argument("--feature-set", choices=FEATURE_SETS, help="Feature set override; defaults to checkpoint feature_set, then audio7.")
     parser.add_argument("--checkpoint", required=True, help="Checkpoint path.")
     parser.add_argument("--output-csv", required=True, help="CSV path for per-sample metrics.")
     parser.add_argument("--details-json", help="Optional JSON path for pattern/chord per-class details.")

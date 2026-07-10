@@ -16,6 +16,7 @@ def compute_v25_losses(
     type_weight: float = 1.0,
     density_weight: float = 1.0,
     note_start_weight: float = 1.0,
+    note_start_pos_weight: float | torch.Tensor | str | None = 1.0,
     pattern_start_weight: float = 0.5,
     chord_size_weight: float = 0.5,
     note_pos_weight: float | torch.Tensor | str | None = 1.0,
@@ -79,11 +80,18 @@ def compute_v25_losses(
     )
     if note_start_target is not None and "note_start_logits" in outputs:
         note_start_target = note_start_target.to(outputs["note_start_logits"].device)
+        note_start_pos_weight_tensor = _resolve_pos_weight(
+            note_start_pos_weight,
+            note_start_target,
+            mask.unsqueeze(-1),
+            device=outputs["note_start_logits"].device,
+        )
         loss_note_start = _masked_mean(
             F.binary_cross_entropy_with_logits(
                 outputs["note_start_logits"],
                 note_start_target,
                 reduction="none",
+                pos_weight=note_start_pos_weight_tensor,
             ),
             mask.unsqueeze(-1),
         )

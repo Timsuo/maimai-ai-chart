@@ -12,7 +12,7 @@ import torch
 
 from maichart.models.transformer_v25 import MaichartTransformerV25
 from maichart.training.collate import collate_v25
-from maichart.training.dataset_v25 import MaichartV25Dataset, TrainingDataError
+from maichart.training.dataset_v25 import FEATURE_SETS, MaichartV25Dataset, TrainingDataError
 from maichart.training.frame_label_codec import CHORD_SIZE_START_CLASSES, START_PATTERN_TYPES
 from maichart.training.utils_v25 import resolve_device, select_sample_index
 
@@ -21,7 +21,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
-        dataset = MaichartV25Dataset(args.manifest, cache_dir=args.cache_dir)
+        device = resolve_device(args.device)
+        checkpoint = _load_checkpoint(Path(args.checkpoint), device)
+        feature_set = _resolve_checkpoint_feature_set(checkpoint, args.feature_set)
+        dataset = MaichartV25Dataset(
+            args.manifest,
+            cache_dir=args.cache_dir,
+            feature_set=feature_set,
+        )
         sample_index = select_sample_index(
             dataset,
             sample_index=args.sample_index,
@@ -29,8 +36,6 @@ def main(argv: list[str] | None = None) -> int:
             difficulty_index=args.difficulty_index,
         )
         sample = dataset[sample_index]
-        device = resolve_device(args.device)
-        checkpoint = _load_checkpoint(Path(args.checkpoint), device)
         model = _model_from_checkpoint(checkpoint, dataset).to(device)
         _load_model_state_dict(model, checkpoint)
         model.eval()
@@ -56,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
             "difficulty_index": sample["meta"].get("difficulty_index"),
             "level": sample["meta"].get("level"),
             "checkpoint": str(Path(args.checkpoint)),
+            "feature_set": dataset.feature_set,
+            "input_dim": dataset.input_dim,
         },
     )
     _write_json(
@@ -585,6 +592,38 @@ def _load_model_state_dict(model: MaichartTransformerV25, checkpoint: dict[str, 
         )
 
 
+def _resolve_checkpoint_feature_set(
+    checkpoint: dict[str, Any],
+    requested_feature_set: str | None,
+) -> str:
+    checkpoint_feature_set = _checkpoint_feature_set(checkpoint)
+    if requested_feature_set and checkpoint_feature_set and requested_feature_set != checkpoint_feature_set:
+        raise TrainingDataError(
+            "Checkpoint feature_set mismatch: "
+            f"checkpoint feature_set={checkpoint_feature_set!r}, "
+            f"requested --feature-set={requested_feature_set!r}."
+        )
+    feature_set = requested_feature_set or checkpoint_feature_set or "audio7"
+    if feature_set not in FEATURE_SETS:
+        raise TrainingDataError(
+            f"Unsupported checkpoint feature_set={feature_set!r}; "
+            f"expected one of: {', '.join(FEATURE_SETS)}."
+        )
+    return feature_set
+
+
+def _checkpoint_feature_set(checkpoint: dict[str, Any]) -> str | None:
+    data_config = checkpoint.get("data_config")
+    if isinstance(data_config, dict) and data_config.get("feature_set"):
+        return str(data_config["feature_set"])
+    if checkpoint.get("feature_set"):
+        return str(checkpoint["feature_set"])
+    train_args = checkpoint.get("train_args") or checkpoint.get("args")
+    if isinstance(train_args, dict) and train_args.get("feature_set"):
+        return str(train_args["feature_set"])
+    return None
+
+
 def _model_from_checkpoint(
     checkpoint: dict[str, Any],
     dataset: MaichartV25Dataset,
@@ -595,6 +634,15 @@ def _model_from_checkpoint(
             "input_dim": dataset.input_dim,
             "num_note_types": dataset.num_note_types,
         }
+    checkpoint_input_dim = int(config.get("input_dim", checkpoint.get("input_dim", dataset.input_dim)))
+    if checkpoint_input_dim != dataset.input_dim:
+        raise TrainingDataError(
+            "Checkpoint input_dim mismatch: "
+            f"checkpoint input_dim={checkpoint_input_dim}, "
+            f"dataset feature_set={dataset.feature_set!r} gives input_dim={dataset.input_dim}. "
+            "Pass the matching --feature-set or use a checkpoint trained with this feature_set."
+        )
+    config["input_dim"] = checkpoint_input_dim
     return MaichartTransformerV25(**config)
 
 
@@ -638,6 +686,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, help="Training manifest JSON path.")
     parser.add_argument("--cache-dir", default="cache", help="Cache root directory.")
+    parser.add_argument("--feature-set", choices=FEATURE_SETS, help="Feature set override; defaults to checkpoint feature_set, then audio7.")
     parser.add_argument("--checkpoint", required=True, help="Checkpoint path.")
     parser.add_argument("--output-dir", required=True, help="Directory for metrics and plots.")
     parser.add_argument("--sample-index", type=int)
