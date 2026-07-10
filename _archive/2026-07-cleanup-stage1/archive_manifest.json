@@ -1,0 +1,155 @@
+﻿[
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w15",
+        "size_bytes":  39958257,
+        "file_count":  16,
+        "last_modified_min":  "2026-07-07 17:17:50",
+        "last_modified_max":  "2026-07-07 17:20:55",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w20",
+        "size_bytes":  39949620,
+        "file_count":  16,
+        "last_modified_min":  "2026-07-07 17:12:16",
+        "last_modified_max":  "2026-07-07 17:15:13",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w25",
+        "size_bytes":  39956848,
+        "file_count":  16,
+        "last_modified_min":  "2026-07-07 17:31:18",
+        "last_modified_max":  "2026-07-07 17:35:42",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w25_seed2310",
+        "size_bytes":  7689971818,
+        "file_count":  210,
+        "last_modified_min":  "2026-07-07 18:29:55",
+        "last_modified_max":  "2026-07-07 18:53:15",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w25_seed42",
+        "size_bytes":  2361074192,
+        "file_count":  70,
+        "last_modified_min":  "2026-07-07 17:59:41",
+        "last_modified_max":  "2026-07-07 18:08:00",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w25_seed8835",
+        "size_bytes":  2361052213,
+        "file_count":  70,
+        "last_modified_min":  "2026-07-07 18:18:05",
+        "last_modified_max":  "2026-07-07 18:29:10",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w30",
+        "size_bytes":  39979613,
+        "file_count":  16,
+        "last_modified_min":  "2026-07-07 16:54:23",
+        "last_modified_max":  "2026-07-07 16:58:24",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_sample24_w25_seed42",
+        "size_bytes":  35451462,
+        "file_count":  15,
+        "last_modified_min":  "2026-07-07 19:07:44",
+        "last_modified_max":  "2026-07-07 19:13:50",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_sample24_w25_seed42_biggermodel_1000epoch",
+        "size_bytes":  194984269,
+        "file_count":  20,
+        "last_modified_min":  "2026-07-07 19:23:16",
+        "last_modified_max":  "2026-07-07 21:34:28",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_song001",
+        "size_bytes":  39798546,
+        "file_count":  15,
+        "last_modified_min":  "2026-07-07 16:17:40",
+        "last_modified_max":  "2026-07-07 16:29:46",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w20.zip",
+        "size_bytes":  36323539,
+        "file_count":  1,
+        "last_modified_min":  "2026-07-07 17:38:07",
+        "last_modified_max":  "2026-07-07 17:38:07",
+        "notes":  "Existing root overfit zip artifact matched archive pattern; original file retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w25.zip",
+        "size_bytes":  36321042,
+        "file_count":  1,
+        "last_modified_min":  "2026-07-07 17:37:28",
+        "last_modified_max":  "2026-07-07 17:37:28",
+        "notes":  "Existing root overfit zip artifact matched archive pattern; original file retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_button_w25_seed42.zip",
+        "size_bytes":  2180669958,
+        "file_count":  1,
+        "last_modified_min":  "2026-07-07 18:11:31",
+        "last_modified_max":  "2026-07-07 18:11:31",
+        "notes":  "Existing root overfit zip artifact matched archive pattern; original file retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/overfit_v25_song001.zip",
+        "size_bytes":  36224981,
+        "file_count":  1,
+        "last_modified_min":  "2026-07-07 16:33:21",
+        "last_modified_max":  "2026-07-07 16:33:21",
+        "notes":  "Existing root overfit zip artifact matched archive pattern; original file retained."
+    },
+    {
+        "archive_file":  "archives/v25_overfit_runs_20260710.7z",
+        "included_path":  "runs/v25_phase2_overfit_limit2",
+        "size_bytes":  1639275442,
+        "file_count":  44,
+        "last_modified_min":  "2026-07-09 16:20:30",
+        "last_modified_max":  "2026-07-09 16:29:16",
+        "notes":  "Old overfit or limit2 run directory archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/event_ir_smoke_reports_20260710.zip",
+        "included_path":  "reports/event_label_compare_limit2",
+        "size_bytes":  1995,
+        "file_count":  4,
+        "last_modified_min":  "2026-07-09 22:18:13",
+        "last_modified_max":  "2026-07-09 22:18:13",
+        "notes":  "Temporary EventIR smoke report archived; original directory retained."
+    },
+    {
+        "archive_file":  "archives/event_ir_smoke_reports_20260710.zip",
+        "included_path":  "reports/event_label_compare_limit2_validation_smoke",
+        "size_bytes":  9043,
+        "file_count":  5,
+        "last_modified_min":  "2026-07-09 23:34:48",
+        "last_modified_max":  "2026-07-09 23:34:48",
+        "notes":  "Temporary EventIR smoke report archived; original directory retained."
+    }
+]
