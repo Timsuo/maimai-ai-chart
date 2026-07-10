@@ -1,0 +1,12 @@
+{
+  "_description": "Repository-level policy: directories that should not contain tracked files, and file size thresholds.",
+  "generated_directories": [
+    "cache/",
+    "cache_qc_fixed/",
+    "cache_event_v2/",
+    "downloads/",
+    "_backup/",
+    "archives/"
+  ],
+  "large_file_threshold_bytes": 10485760
+}

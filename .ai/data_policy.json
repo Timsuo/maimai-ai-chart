@@ -1,0 +1,35 @@
+{
+  "_description": "Data health policy: manifest locations, identification patterns, cache roots, required data products, split keys, legacy path mappings, and output limits.",
+  "manifest_paths": ["manifests/"],
+  "manifest_include_patterns": [
+    "training_manifest*.json",
+    "*batch*.json",
+    "*split*.json",
+    "id_test*.json",
+    "*_id_batch*.json"
+  ],
+  "manifest_exclude_patterns": [
+    "*config*.json",
+    "*metrics*.json",
+    "*report*.json",
+    "*prediction*.json",
+    "*summary*.json"
+  ],
+  "cache_roots": ["cache_qc_fixed/", "cache_event_v2/"],
+  "required_data_products": [
+    "audio_features",
+    "chart_ir",
+    "frame_labels",
+    "alignment_report"
+  ],
+  "split_keys_to_check": ["splits", "split_info", "train_ids", "val_ids", "test_ids", "train_samples", "val_samples", "test_samples"],
+  "legacy_path_mappings": [
+    { "from": "F:\\AI maichart designer\\cache_qc_fixed", "to": "cache_qc_fixed" },
+    { "from": "F:\\AI maichart designer\\cache_event_v2", "to": "cache_event_v2" },
+    { "from": "F:\\AI maichart designer\\cache", "to": "cache_qc_fixed" },
+    { "from": "F:/AI maichart designer/cache_qc_fixed", "to": "cache_qc_fixed" },
+    { "from": "F:/AI maichart designer/cache_event_v2", "to": "cache_event_v2" },
+    { "from": "F:/AI maichart designer/cache", "to": "cache_qc_fixed" }
+  ],
+  "max_issue_examples": 20
+}

@@ -1,0 +1,75 @@
+{
+  "_description": "Model/experiment health policy. Controls experiment discovery, file requirements, per-experiment-type rule severities, and whether historical experiments can block the repository.",
+  "experiment_roots": ["runs/", "experiments/", "outputs/"],
+  "required_experiment_files": ["train_log.csv"],
+  "desired_experiment_files": ["metrics.json", "eval_test.csv", "prediction_sample.json"],
+  "checkpoint_required": false,
+  "loss_divergence_threshold_factor": 3.0,
+  "overfit_train_val_gap_threshold": 0.5,
+  "blocking_scope": "latest_or_active",
+  "historical_experiments_can_block": false,
+  "experiment_type_rules": {
+    "overfit_smoke": {
+      "description": "Overfit smoke test: expected to overfit. Check that training succeeded (loss decreased). Overfitting is expected behavior.",
+      "expect_overfit": true,
+      "focus": "training_success"
+    },
+    "batch_smoke": {
+      "description": "Batch smoke test: check that the full pipeline ran end-to-end.",
+      "expect_overfit": false,
+      "focus": "pipeline_completeness"
+    },
+    "full_training": {
+      "description": "Full training run: check validation performance, generalization gap, and metric degradation.",
+      "expect_overfit": false,
+      "focus": "validation_performance"
+    },
+    "ablation": {
+      "description": "Ablation study: check that a baseline exists for comparison.",
+      "expect_overfit": false,
+      "focus": "baseline_comparison"
+    },
+    "evaluation": {
+      "description": "Evaluation-only run: check that checkpoint and evaluation data match.",
+      "expect_overfit": false,
+      "focus": "checkpoint_data_match"
+    }
+  },
+  "experiment_rule_severities": {
+    "overfit_smoke": {
+      "late_loss_rebound": "WARNING",
+      "nan_or_inf": "BLOCKED",
+      "missing_checkpoint": "WARNING",
+      "insufficient_overfit": "WARNING"
+    },
+    "batch_smoke": {
+      "late_loss_rebound": "WARNING",
+      "nan_or_inf": "BLOCKED",
+      "pipeline_incomplete": "BLOCKED",
+      "missing_checkpoint": "WARNING"
+    },
+    "full_training": {
+      "late_loss_rebound": "WARNING",
+      "nan_or_inf": "BLOCKED",
+      "missing_required_metrics": "BLOCKED",
+      "large_train_val_gap": "WARNING",
+      "val_loss_degradation": "WARNING",
+      "no_validation_metrics": "WARNING",
+      "missing_checkpoint": "WARNING",
+      "final_weaker_than_best": "WARNING"
+    },
+    "ablation": {
+      "missing_baseline": "WARNING",
+      "nan_or_inf": "BLOCKED",
+      "missing_checkpoint": "WARNING",
+      "late_loss_rebound": "WARNING"
+    },
+    "evaluation": {
+      "missing_checkpoint": "BLOCKED",
+      "dataset_checkpoint_mismatch": "BLOCKED",
+      "missing_eval_data": "BLOCKED",
+      "nan_or_inf": "BLOCKED"
+    }
+  },
+  "nan_check_columns": []
+}

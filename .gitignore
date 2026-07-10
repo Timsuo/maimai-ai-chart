@@ -1,0 +1,66 @@
+# Copyright-sensitive local datasets and derived caches
+raw_chart_data/
+cache/
+sample_runs/
+manifests/
+reports/*
+!reports/repository_health/
+reports/repository_health/latest.json
+reports/repository_health/latest.md
+reports/repository_health/history/
+
+# Local agent/workspace metadata
+.gitignore
+agents.md
+
+# Local Python environments and bundled runtimes
+.venv/
+tools/*
+!tools/analyze_pattern_labels.py
+!tools/check_git_health.py
+!tools/check_data_health.py
+!tools/check_experiment_health.py
+!tools/repo_health_check.py
+get-pip.py
+python-*.exe
+python-*.zip
+python-install.log
+
+# Python/package build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Training/model outputs
+checkpoints/
+runs/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Audio/image assets that should only be committed intentionally
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.m4a
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak

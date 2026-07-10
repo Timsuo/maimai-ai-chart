@@ -1,0 +1,5 @@
+{
+  "_description": "Branch policy for repository health checks. Protected branches may not be force-pushed or deleted. Stale branches are those with no commits in the specified number of days.",
+  "protected_branches": ["main"],
+  "stale_branch_days": 30
+}
