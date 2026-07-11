@@ -39,12 +39,14 @@ def main(argv: list[str] | None = None) -> int:
             args.manifest,
             cache_dir=args.cache_dir,
             feature_set=args.feature_set,
+            cache_samples=args.cache_samples,
         )
         val_dataset = (
             MaichartV25Dataset(
                 args.val_manifest,
                 cache_dir=args.cache_dir,
                 feature_set=args.feature_set,
+                cache_samples=args.cache_samples,
             )
             if args.val_manifest
             else None
@@ -67,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "V2.5 dataset: "
         f"feature_set={dataset.feature_set} "
+        f"cache_samples={dataset.cache_samples} "
         f"samples={len(dataset)} train_samples={len(train_dataset)} "
         f"val_samples={len(val_dataset) if val_dataset is not None else 0} "
         f"input_dim={dataset.input_dim} "
@@ -772,6 +775,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--val-manifest", help="Validation training manifest JSON path.")
     parser.add_argument("--cache-dir", default="cache", help="Cache root directory.")
     parser.add_argument("--feature-set", choices=FEATURE_SETS, default="audio7")
+    parser.add_argument("--cache-samples", action="store_true", help="Cache decoded dataset samples in memory after first load.")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--val-batch-size", type=int)

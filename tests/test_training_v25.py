@@ -142,6 +142,22 @@ def test_v25_audio7_plus_grid_feature_dim_and_values_are_finite(tmp_path) -> Non
     assert sample["x"][0, -3:].tolist() == pytest.approx([120 / 240, 4 / 5, 12 / 15])
 
 
+def test_v25_dataset_cache_samples_reuses_loaded_sample(tmp_path) -> None:
+    manifest = _write_minimal_v25_cache(tmp_path)
+    dataset = MaichartV25Dataset(
+        manifest,
+        cache_dir=tmp_path / "cache",
+        feature_set="audio7_plus_grid",
+        cache_samples=True,
+    )
+
+    first = dataset[0]
+    second = dataset[0]
+    assert first is second
+    assert torch.equal(first["x"], second["x"])
+    assert dataset._sample_cache
+
+
 def test_v25_note_start_pos_weight_fixed_and_auto(tmp_path) -> None:
     manifest = _write_minimal_v25_cache(tmp_path)
     dataset = MaichartV25Dataset(manifest, cache_dir=tmp_path / "cache")

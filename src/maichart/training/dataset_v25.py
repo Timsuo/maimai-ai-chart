@@ -66,8 +66,11 @@ class MaichartV25Dataset(Dataset):
         include_unusable: bool = False,
         load_chart_ir: bool = False,
         feature_set: str = "audio7",
+        cache_samples: bool = False,
     ) -> None:
         self.feature_set = _normalize_feature_set(feature_set)
+        self.cache_samples = cache_samples
+        self._sample_cache: dict[int, dict[str, Any]] = {}
         self.manifest_path = Path(manifest_path).resolve()
         self.manifest_base = self.manifest_path.parent
         self.cache_dir = Path(cache_dir).resolve()
@@ -114,6 +117,8 @@ class MaichartV25Dataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
+        if self.cache_samples and index in self._sample_cache:
+            return self._sample_cache[index]
         ref = self.samples[index]
         audio_features = self._load_json(ref.audio_features_path, "audio_features.json")
         frame_labels = self._load_json(ref.frame_labels_path, "frame_labels.json")
@@ -154,7 +159,7 @@ class MaichartV25Dataset(Dataset):
                 f"{ref.difficulty_index}: x={x.size(0)}, y={y['note_presence'].size(0)}."
             )
 
-        return {
+        sample = {
             "x": x,
             "y": y,
             "meta": {
@@ -170,6 +175,9 @@ class MaichartV25Dataset(Dataset):
                 "feature_set": self.feature_set,
             },
         }
+        if self.cache_samples:
+            self._sample_cache[index] = sample
+        return sample
 
     def _collect_samples(self, *, include_unusable: bool) -> list[TrainingSampleRef]:
         songs = self.manifest.get("songs")

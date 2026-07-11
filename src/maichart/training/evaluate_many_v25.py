@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             args.manifest,
             cache_dir=args.cache_dir,
             feature_set=feature_set,
+            cache_samples=args.cache_samples,
         )
         model = _model_from_checkpoint(checkpoint, dataset).to(device)
         _load_model_state_dict(model, checkpoint)
@@ -287,6 +288,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", required=True, help="Training manifest JSON path.")
     parser.add_argument("--cache-dir", default="cache", help="Cache root directory.")
     parser.add_argument("--feature-set", choices=FEATURE_SETS, help="Feature set override; defaults to checkpoint feature_set, then audio7.")
+    parser.add_argument("--cache-samples", action="store_true", help="Cache decoded dataset samples in memory after first load.")
     parser.add_argument("--checkpoint", required=True, help="Checkpoint path.")
     parser.add_argument("--output-csv", required=True, help="CSV path for per-sample metrics.")
     parser.add_argument("--details-json", help="Optional JSON path for pattern/chord per-class details.")
